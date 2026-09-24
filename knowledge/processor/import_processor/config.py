@@ -11,13 +11,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-
 @dataclass
 class ImportConfig:
     """导入流程配置"""
 
     # ==================== 文档处理配置 ====================
-    max_content_length: int = 1000  # 切片最大长度
+    max_content_length: int = 2000  # 切片最大长度
     img_content_length: int = 200  # 图片上下文最大长度
     min_content_length: int = 500  # 合并短内容的最小长度
     overlap_sentences: int = 1  # 句子级切分时的重叠句数
@@ -59,6 +58,7 @@ class ImportConfig:
         default_factory=lambda: os.getenv("ENTITY_NAME_COLLECTION", "")
     )
 
+
     # ==================== MinIO 配置 ====================
     minio_endpoint: str = field(
         default_factory=lambda: os.getenv("MINIO_ENDPOINT", "")
@@ -78,7 +78,7 @@ class ImportConfig:
     embedding_dim: int = field(
         default_factory=lambda: int(os.getenv("EMBEDDING_DIM", "1024"))
     )
-    embedding_batch_size: int = 8  # 修改
+    embedding_batch_size: int = 8
 
     # ==================== 速率限制 ====================
     requests_per_minute: int = 15  # 图片总结 API 速率限制
@@ -88,7 +88,7 @@ class ImportConfig:
         """从环境变量加载配置"""
         return cls()
 
-    # http://192.168.200.130:9000/
+
     def get_minio_base_url(self):
         base_protocol = "https://" if self.minio_secure else "http://"
         return base_protocol + f"{self.minio_endpoint}"

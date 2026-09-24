@@ -17,3 +17,4 @@ def get_local_base_dir() -> str:
 def get_front_page_dir() -> str:
     """获取前端静态页面目录"""
     return FRONT_PAGE_DIR
+

@@ -433,10 +433,7 @@ class ItemNameConfirmedNode(BaseNode):
 if __name__ == '__main__':
     item_name_confirmed_node = ItemNameConfirmedNode()
     init_state = {
-        # "original_query": "RS-12数字万用表和H3C LA2608 室内无线网关的操作区别是什么?"
-        # "original_query": "RS-12数字万用表和RS-13数字万用表的区别?"
-        "original_query": "RS-12数字万用表如何测量电压以及HAK180的介质规格有哪些?"
-        # "original_query": "RS-12数字万用表如何测量电压"  # 单个商品询问
+        "original_query": "今天天气怎么样?"
     }
     llm_result = item_name_confirmed_node.process(init_state)
 

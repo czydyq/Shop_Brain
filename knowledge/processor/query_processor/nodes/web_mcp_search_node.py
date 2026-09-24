@@ -2,7 +2,10 @@ import asyncio
 import json
 from json import JSONDecodeError
 from typing import Tuple, List, Dict, Any,Union
-from agents.mcp import MCPServerStreamableHttp
+
+import httpx2
+from mcp.client.session import ClientSession
+from mcp.client.streamable_http import streamable_http_client
 
 from knowledge.processor.query_processor.base import BaseNode, T
 from knowledge.processor.query_processor.state import QueryGraphState
@@ -11,6 +14,9 @@ from knowledge.processor.query_processor.exceptions import StateFieldError
 
 class WebMcpSearchNode(BaseNode):
     name = "web_mcp_search_node"
+
+    # search_pro 只接受 query 一个参数，返回条数固定约10条，这里按原意只取前3条
+    _WEB_SEARCH_MAX_RESULTS = 3
 
     def process(self, state: QueryGraphState) ->Union[QueryGraphState,Dict[str, Any]] :
 
@@ -55,62 +61,81 @@ class WebMcpSearchNode(BaseNode):
 
         """
 
-
         # 1. 定义MCP客户端(StreamableHttp方式)
-        async with MCPServerStreamableHttp(
-                name="联网搜索",  # MCP客户端名字
-                params={  # 提供MCP服务的第三方平台的api_key和base_url
-                    "url": self.config.mcp_dashscope_base_url,
-                    "headers": {"Authorization": f"Bearer {self.config.openai_api_key}"},
-                    "timeout": 60,  # 超时时间
-                },
-                cache_tools_list=True,  # 缓存MCP服务下的工具列表的,加速
-                max_retry_attempts=3,  # 重试次数
-        ) as mcp_client:
-            # 2. 调用工具
-            web_search_result = await mcp_client.call_tool(tool_name="bailian_web_search",
-                                                           arguments={"query": rewritten_query, "count": 3})
+        #    注意：mcp 2.x 的HTTP客户端是 httpx2，不是 httpx
+        async with httpx2.AsyncClient(
+                headers={"Authorization": f"Bearer {self.config.openai_api_key}"},
+                timeout=60,  # 超时时间
+        ) as http_client:
+            async with streamable_http_client(
+                    self.config.mcp_dashscope_base_url,
+                    http_client=http_client,
+            ) as (read_stream, write_stream):
+                async with ClientSession(read_stream, write_stream) as session:
 
-            # 3. 解析数据
-            # 3.1 获取文本内容块对象
-            text_content = web_search_result.content[0]
-            if not text_content:
-                return []
+                    # 2. 握手：必须显式调用initialize
+                    #    mcp 2.x 默认先发 server/discover 做协议代际探测，而DashScope的MCP服务
+                    #    只支持经典握手、对 server/discover 直接返回500，会导致连接失败
+                    await session.initialize()
 
-            # 3.2 获取文本内容块对象的内容
-            text_content_text = text_content.text
-            if not text_content_text:
-                return []
+                    # 3. 调用工具
+                    #    search_pro 只支持query参数，多传count会返回PARAM_INVALID
+                    web_search_result = await session.call_tool(
+                        "search_pro", arguments={"query": rewritten_query})
 
-            # 3.3 反序列化
-            try:
-                text_content_obj: Dict[str, Any] = json.loads(text_content_text)
+                    # 4. 工具自身报错（HTTP状态码是200，错误在返回报文里）
+                    if web_search_result.is_error:
+                        self.logger.error(f"web_search检索失败 失败信息：{self._get_first_text(web_search_result)}")
+                        return []
 
-                # 3.4 获取真正的网页内容
-                pages = text_content_obj.get('pages', [])
-                if not pages:
-                    return []
+                    # 5. 解析数据
+                    # 5.1 获取文本内容块对象的内容
+                    text_content_text = self._get_first_text(web_search_result)
+                    if not text_content_text:
+                        return []
 
-                # 3.5 遍历
-                web_search_results = []
-                for page in pages:
-                    web_search_results.append({
-                        "snippet": page.get('snippet', '').strip(),
-                        "title": page.get('title', '').strip(),
-                        "url": page.get('url', '').strip(),
-                    })
-                return web_search_results
-            except JSONDecodeError as e:
-                self.logger.error(f"web_search检索失败 失败信息：{e.msg} 失败的内容:{e.doc} 失败的位置：{e.pos}")
-                return []
+                    # 5.2 反序列化
+                    try:
+                        text_content_obj: Dict[str, Any] = json.loads(text_content_text)
+                    except JSONDecodeError as e:
+                        self.logger.error(f"web_search检索失败 失败信息：{e.msg} 失败的内容:{e.doc} 失败的位置：{e.pos}")
+                        return []
+
+                    # 5.3 获取真正的网页内容
+                    pages = text_content_obj.get('pages', [])
+                    if not pages:
+                        return []
+
+                    # 5.4 遍历
+                    web_search_results = []
+                    for page in pages[:self._WEB_SEARCH_MAX_RESULTS]:
+                        web_search_results.append({
+                            "snippet": page.get('snippet', '').strip(),
+                            "title": page.get('title', '').strip(),
+                            "url": page.get('url', '').strip(),
+                        })
+                    return web_search_results
+
+    @staticmethod
+    def _get_first_text(tool_result) -> str:
+        """取出工具返回的第一个文本内容块的内容"""
+        if not tool_result.content:
+            return ""
+        return tool_result.content[0].text or ""
 
 
 if __name__ == '__main__':
     web_search_node = WebMcpSearchNode()
 
     mock_state = {
-        "rewritten_query": "RS-12 数字万用表如何测量直流电压？",
+        "rewritten_query": "今天的天气怎么样？",
         "item_names": ["RS-12 数字万用表"],
     }
 
-    web_search_node.process(mock_state)
+    search_result = web_search_node.process(mock_state)
+    search_docs = search_result.get('web_search_docs', []) if isinstance(search_result, dict) else []
+
+    print(f"检索到 {len(search_docs)} 条网络结果")
+    for index, doc in enumerate(search_docs, 1):
+        print(f"  {index}. {doc['title']}  {doc['url']}")
+        print(f"     {doc['snippet'][:80]}...")

@@ -3,3 +3,10 @@
 .idea/
 __pycache__/
 *.pyc
+
+# 环境变量（含密钥，不入库）
+knowledge/.env
+
+# 运行时临时产物
+knowledge/processor/import_processor/temp_dir/
+knowledge/temp_data/

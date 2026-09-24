@@ -10,9 +10,8 @@ from knowledge.processor.import_processor.exceptions import FileProcessingError
 from knowledge.utils.client.storage_clients import StorageClients
 from knowledge.processor.import_processor.main_graph import import_app
 from knowledge.utils.task_util import update_task_status, add_running_task, add_done_task, add_node_duration, \
-    TASK_STATUS_PROCESSING, \
-    TASK_STATUS_COMPLETED, \
-    TASK_STATUS_FAILED
+    TASK_STATUS_PROCESSING, TASK_STATUS_COMPLETED, TASK_STATUS_FAILED
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
